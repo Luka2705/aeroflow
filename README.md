@@ -3,7 +3,7 @@
 Ein virtueller Windkanal im Browser. Eigene 3D-Modelle laden und die Umströmung
 in Echtzeit visualisieren — als CFD-artige Wirbelfäden oder klassische Stromlinien.
 
-**Live:** https://LUKA.github.io/aeroflow/ *(URL wird nach dem Deploy ergänzt)*
+**Live:** https://luka2705.github.io/aeroflow/
 
 ## Features
 
