@@ -15,7 +15,7 @@ in Echtzeit visualisieren — als CFD-artige Wirbelfäden oder klassische Stroml
 - **Mesh-genaue Umströmung** über ein Signed-Distance-Field (three-mesh-bvh)
 - Druckvisualisierung auf der Oberfläche, Schnittebenen mit Druckfeld,
   grobe Kennwerte (c<sub>w</sub>, Stirnfläche, Luftwiderstand)
-- Demo-Objekte: Auto, Kugel, Kapsel
+- Demo-Objekte: Auto, Flügel, Tropfen, Kugel, Kapsel, Ring
 
 > ⚠️ Keine echte CFD-Simulation — die Strömung ist ein physikalisch motiviertes,
 > synthetisches Feld für Anschauung und Ästhetik, kein Rechenwerkzeug.
