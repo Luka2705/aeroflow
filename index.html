@@ -1,0 +1,1778 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AeroFlow — 3D Windkanal</title>
+<meta name="description" content="AeroFlow: virtueller 3D-Windkanal im Browser. Eigene 3D-Modelle (STL, OBJ, GLB, BLEND) laden und die Umströmung mit CFD-artigen Wirbelfäden visualisieren.">
+<meta property="og:title" content="AeroFlow — Virtueller 3D-Windkanal">
+<meta property="og:description" content="3D-Modelle laden und die Umströmung mit CFD-artigen Wirbelstrukturen im Browser visualisieren.">
+<meta property="og:type" content="website">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🌀</text></svg>">
+<style>
+  :root {
+    --bg: #0b0e14;
+    --panel: rgba(18, 22, 32, 0.82);
+    --border: rgba(255,255,255,0.09);
+    --text: #e8ecf4;
+    --muted: #8b94a7;
+    --accent: #35c7e8;
+    --accent2: #7b6cff;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg);
+    font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: var(--text); }
+  #canvas-wrap { position: absolute; inset: 0; }
+  canvas { display: block; }
+
+  header {
+    position: absolute; top: 0; left: 0; right: 0; z-index: 10;
+    display: flex; align-items: center; gap: 12px;
+    padding: 16px 24px; pointer-events: none;
+  }
+  .logo { display: flex; align-items: center; gap: 10px; pointer-events: auto; }
+  .logo-mark {
+    width: 34px; height: 34px; border-radius: 10px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    display: grid; place-items: center; font-size: 18px;
+    box-shadow: 0 4px 18px rgba(53,199,232,0.35);
+  }
+  .logo h1 { font-size: 17px; font-weight: 700; letter-spacing: 0.3px; }
+  .logo span { font-size: 11px; color: var(--muted); display: block; font-weight: 500; }
+
+  #ui-toggle {
+    margin-left: auto; pointer-events: auto;
+    width: 38px; height: 38px; border-radius: 12px;
+    border: 1px solid var(--border); cursor: pointer;
+    background: var(--panel); backdrop-filter: blur(12px);
+    color: var(--text); font-size: 16px; line-height: 1;
+    display: grid; place-items: center;
+    transition: all 0.15s ease;
+  }
+  #ui-toggle:hover { background: rgba(255,255,255,0.12); }
+  #controls, #stats, #legend, #hint {
+    transition: opacity 0.25s ease, transform 0.25s ease;
+  }
+  body.ui-hidden #controls { opacity: 0; transform: translateX(-24px); pointer-events: none; }
+  body.ui-hidden #stats   { opacity: 0; transform: translateX(24px);  pointer-events: none; }
+  body.ui-hidden #legend  { opacity: 0; transform: translateY(24px);  pointer-events: none; }
+  body.ui-hidden #hint    { opacity: 0; pointer-events: none; }
+
+  .panel {
+    position: absolute; z-index: 10;
+    background: var(--panel);
+    backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.45);
+  }
+  #controls {
+    top: 76px; left: 24px; width: 280px;
+    padding: 18px;
+    display: flex; flex-direction: column; gap: 15px;
+    max-height: calc(100vh - 110px); overflow-y: auto;
+  }
+  #controls > * { flex-shrink: 0; }
+  .section-title {
+    font-size: 11px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 1.2px; color: var(--muted);
+  }
+  .ctrl { display: flex; flex-direction: column; gap: 6px; }
+  .ctrl-row { display: flex; justify-content: space-between; align-items: baseline; }
+  .ctrl label { font-size: 13px; font-weight: 500; }
+  .ctrl .val { font-size: 12px; color: var(--accent); font-variant-numeric: tabular-nums; font-weight: 600; }
+  input[type=range] {
+    -webkit-appearance: none; appearance: none; width: 100%; height: 4px;
+    border-radius: 4px; background: rgba(255,255,255,0.12); outline: none; cursor: pointer;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    box-shadow: 0 2px 8px rgba(53,199,232,0.5); cursor: grab;
+  }
+  input[type=range]:disabled { opacity: 0.35; }
+  .btn {
+    padding: 10px 14px; border-radius: 10px; border: 1px solid var(--border);
+    background: rgba(255,255,255,0.05); color: var(--text);
+    font-size: 13px; font-weight: 600; cursor: pointer;
+    transition: all 0.15s ease; text-align: center;
+  }
+  .btn:hover { background: rgba(255,255,255,0.11); border-color: rgba(255,255,255,0.2); }
+  .btn.primary {
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    border: none; color: #fff;
+  }
+  .btn.primary:hover { filter: brightness(1.12); }
+  .btn-row { display: flex; gap: 8px; }
+  .btn-row .btn { flex: 1; }
+  .seg { display: flex; gap: 0; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  .seg button {
+    flex: 1; padding: 8px 4px; background: transparent; border: none; color: var(--muted);
+    font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.15s;
+  }
+  .seg button + button { border-left: 1px solid var(--border); }
+  .seg button.on {
+    background: linear-gradient(135deg, rgba(53,199,232,0.25), rgba(123,108,255,0.25));
+    color: var(--text);
+  }
+  .toggle-row { display: flex; align-items: center; justify-content: space-between; }
+  .toggle-row label:first-child { font-size: 13px; font-weight: 500; }
+  .switch { position: relative; width: 40px; height: 22px; flex-shrink: 0; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .slider-sw {
+    position: absolute; inset: 0; border-radius: 22px; cursor: pointer;
+    background: rgba(255,255,255,0.14); transition: 0.2s;
+  }
+  .slider-sw:before {
+    content: ""; position: absolute; width: 16px; height: 16px; border-radius: 50%;
+    left: 3px; top: 3px; background: #fff; transition: 0.2s;
+  }
+  .switch input:checked + .slider-sw { background: linear-gradient(135deg, var(--accent), var(--accent2)); }
+  .switch input:checked + .slider-sw:before { transform: translateX(18px); }
+
+  #dropzone {
+    border: 1.5px dashed rgba(255,255,255,0.22); border-radius: 12px;
+    padding: 16px 12px; text-align: center; cursor: pointer;
+    transition: all 0.2s ease; font-size: 12.5px; color: var(--muted); line-height: 1.5;
+  }
+  #dropzone:hover, #dropzone.drag {
+    border-color: var(--accent); background: rgba(53,199,232,0.07); color: var(--text);
+  }
+  #dropzone .big { font-size: 24px; display: block; margin-bottom: 4px; }
+  #dropzone b { color: var(--text); }
+
+  #legend { right: 24px; bottom: 24px; padding: 14px 16px; width: 190px; }
+  #legend .bar {
+    height: 12px; border-radius: 6px; margin: 8px 0 4px;
+    background: linear-gradient(90deg, #1e3cff, #00c8ff, #29e66b, #ffe12b, #ff9412, #ff2a1a);
+  }
+  #legend .lbl { display: flex; justify-content: space-between; font-size: 10.5px; color: var(--muted); }
+  #legend .t { font-size: 12px; font-weight: 600; }
+
+  #stats {
+    right: 24px; top: 76px; padding: 14px 18px; min-width: 190px;
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .stat { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+  .stat .k { font-size: 12px; color: var(--muted); }
+  .stat .v { font-size: 15px; font-weight: 700; color: var(--accent); font-variant-numeric: tabular-nums; }
+  .stat .v small { font-size: 10px; color: var(--muted); font-weight: 500; }
+
+  #hint {
+    position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%);
+    z-index: 10; font-size: 12px; color: var(--muted);
+    background: var(--panel); border: 1px solid var(--border);
+    padding: 8px 16px; border-radius: 999px; backdrop-filter: blur(12px);
+    white-space: nowrap;
+  }
+  #loading {
+    position: absolute; inset: 0; z-index: 50; display: none;
+    place-items: center; background: rgba(11,14,20,0.7); backdrop-filter: blur(6px);
+  }
+  #loading.on { display: grid; }
+  #loading .box { display: flex; flex-direction: column; align-items: center; gap: 14px; }
+  #loading .msg { font-size: 13px; color: var(--muted); }
+  .spinner {
+    width: 44px; height: 44px; border-radius: 50%;
+    border: 3px solid rgba(255,255,255,0.15); border-top-color: var(--accent);
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #file-input { display: none; }
+
+  @media (max-width: 760px) {
+    #controls { width: calc(100vw - 32px); left: 16px; top: 70px; max-height: 45vh; }
+    #stats { display: none; }
+    #legend { width: 150px; right: 16px; bottom: 16px; }
+    #hint { display: none; }
+  }
+</style>
+</head>
+<body>
+<div id="canvas-wrap"></div>
+
+<header>
+  <div class="logo">
+    <div class="logo-mark">🌀</div>
+    <div>
+      <h1>AeroFlow</h1>
+      <span>Virtueller 3D-Windkanal</span>
+    </div>
+  </div>
+  <button id="ui-toggle" title="Menü ein-/ausblenden">◧</button>
+</header>
+
+<div class="panel" id="controls">
+  <div id="dropzone">
+    <span class="big">📦</span>
+    <b>3D-Modell hierher ziehen</b><br>
+    oder klicken zum Auswählen<br>
+    <span style="opacity:.7">STL · OBJ · GLB / GLTF · BLEND</span>
+  </div>
+  <input type="file" id="file-input" accept=".stl,.obj,.glb,.gltf,.blend">
+
+  <div class="btn-row">
+    <button class="btn" data-demo="car">🚗 Auto</button>
+    <button class="btn" data-demo="sphere">⚪ Kugel</button>
+    <button class="btn" data-demo="capsule">💊 Kapsel</button>
+  </div>
+
+  <div class="section-title">Modell ausrichten</div>
+  <div class="btn-row">
+    <button class="btn" id="rot-x" title="Um X-Achse drehen">↻ X 90°</button>
+    <button class="btn" id="rot-y" title="Um Y-Achse drehen">↻ Y 90°</button>
+    <button class="btn" id="rot-z" title="Um Z-Achse drehen">↻ Z 90°</button>
+  </div>
+  <div class="ctrl">
+    <div class="ctrl-row"><label>Größe</label><span class="val" id="v-scale">100 %</span></div>
+    <input type="range" id="scale" min="25" max="400" value="100">
+  </div>
+
+  <div class="section-title">Simulation</div>
+
+  <div class="ctrl">
+    <div class="ctrl-row"><label>Darstellung</label></div>
+    <div class="seg" id="style-seg">
+      <button data-style="vortex" class="on">🌀 Wirbel (CFD)</button>
+      <button data-style="beams">✦ Beams</button>
+    </div>
+  </div>
+
+  <div class="ctrl">
+    <div class="ctrl-row"><label>Windgeschwindigkeit</label><span class="val" id="v-speed">30 m/s</span></div>
+    <input type="range" id="speed" min="5" max="120" value="30">
+  </div>
+
+  <div class="ctrl">
+    <div class="ctrl-row"><label>Stromlinien</label><span class="val" id="v-lines">800</span></div>
+    <input type="range" id="lines" min="50" max="2500" value="800">
+  </div>
+
+  <div class="ctrl">
+    <div class="ctrl-row"><label>Modell drehen (Anströmwinkel)</label><span class="val" id="v-yaw">0°</span></div>
+    <input type="range" id="yaw" min="-180" max="180" value="0">
+  </div>
+
+  <div class="toggle-row">
+    <label>Animation</label>
+    <label class="switch"><input type="checkbox" id="animate" checked><span class="slider-sw"></span></label>
+  </div>
+
+  <div class="toggle-row">
+    <label>Druck auf Oberfläche</label>
+    <label class="switch"><input type="checkbox" id="pressure" checked><span class="slider-sw"></span></label>
+  </div>
+
+  <div class="toggle-row">
+    <label>Nachlauf-Turbulenz</label>
+    <label class="switch"><input type="checkbox" id="wake" checked><span class="slider-sw"></span></label>
+  </div>
+
+  <div class="toggle-row">
+    <label>Auto-Rotation Kamera</label>
+    <label class="switch"><input type="checkbox" id="autorotate"><span class="slider-sw"></span></label>
+  </div>
+
+  <div class="section-title">Schnittebene (Druckfeld)</div>
+  <div class="seg" id="slice-seg">
+    <button data-slice="off" class="on">Aus</button>
+    <button data-slice="v">Vertikal</button>
+    <button data-slice="h">Horizontal</button>
+  </div>
+  <div class="ctrl">
+    <div class="ctrl-row"><label>Position</label><span class="val" id="v-slicepos">0.0</span></div>
+    <input type="range" id="slicepos" min="-100" max="100" value="0" disabled>
+  </div>
+
+  <button class="btn primary" id="recalc">🔄 Simulation neu berechnen</button>
+</div>
+
+<div class="panel" id="stats">
+  <div class="section-title">Messwerte</div>
+  <div class="stat"><span class="k">Windgeschw.</span><span class="v" id="s-speed">30 <small>m/s</small></span></div>
+  <div class="stat"><span class="k">≈ Widerstandsbeiwert c<sub>w</sub></span><span class="v" id="s-cd">–</span></div>
+  <div class="stat"><span class="k">Stirnfläche</span><span class="v" id="s-area">– <small>m²</small></span></div>
+  <div class="stat"><span class="k">≈ Luftwiderstand</span><span class="v" id="s-drag">– <small>N</small></span></div>
+</div>
+
+<div class="panel" id="legend">
+  <div class="t">Druck (c<sub>p</sub>)</div>
+  <div class="bar"></div>
+  <div class="lbl"><span>niedrig (Sog)</span><span>hoch (Stau)</span></div>
+</div>
+
+<div id="hint">🖱️ Ziehen = drehen · Scrollen = zoomen · Rechte Taste = verschieben</div>
+
+<div id="loading"><div class="box"><div class="spinner"></div><div class="msg">Strömungsfeld wird berechnet…</div></div></div>
+
+<script src="vendor/js.blend.js"></script>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+    "three-mesh-bvh": "https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.7.6/build/index.module.js",
+    "fzstd": "https://cdn.jsdelivr.net/npm/fzstd@0.1.1/esm/index.mjs"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { STLLoader } from 'three/addons/loaders/STLLoader.js';
+import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { MeshBVH } from 'three-mesh-bvh';
+import { decompress as zstdDecompress } from 'fzstd';
+window.THREE = THREE; // js.blend erwartet ein globales THREE
+
+/* ============================================================
+   Szene
+============================================================ */
+const wrap = document.getElementById('canvas-wrap');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+wrap.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0b0e14);
+scene.fog = new THREE.Fog(0x0b0e14, 22, 55);
+
+const camera = new THREE.PerspectiveCamera(50, innerWidth/innerHeight, 0.05, 200);
+camera.position.set(7, 4.2, 9);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.06;
+controls.target.set(0, 1.1, 0);
+controls.maxDistance = 40;
+controls.minDistance = 1.5;
+
+scene.add(new THREE.HemisphereLight(0xbfd4ff, 0x1a1f2b, 0.9));
+const key = new THREE.DirectionalLight(0xffffff, 1.6);
+key.position.set(6, 10, 4);
+scene.add(key);
+const fill = new THREE.DirectionalLight(0x8fb8ff, 0.5);
+fill.position.set(-6, 4, -6);
+scene.add(fill);
+
+const grid = new THREE.GridHelper(60, 60, 0x2a3348, 0x1a2030);
+scene.add(grid);
+
+/* ============================================================
+   Jet-Farbskala
+============================================================ */
+function jet(t) {
+  t = Math.min(1, Math.max(0, t));
+  const stops = [
+    [0.00, 0.12, 0.23, 1.00],
+    [0.20, 0.00, 0.78, 1.00],
+    [0.40, 0.16, 0.90, 0.42],
+    [0.60, 1.00, 0.88, 0.17],
+    [0.80, 1.00, 0.58, 0.07],
+    [1.00, 1.00, 0.16, 0.10],
+  ];
+  for (let i = 0; i < stops.length - 1; i++) {
+    const a = stops[i], b = stops[i+1];
+    if (t <= b[0]) {
+      const f = (t - a[0]) / (b[0] - a[0]);
+      return [a[1]+(b[1]-a[1])*f, a[2]+(b[2]-a[2])*f, a[3]+(b[3]-a[3])*f];
+    }
+  }
+  return [1, 0.16, 0.10];
+}
+
+/* ============================================================
+   Modell-Verwaltung
+============================================================ */
+const modelGroup = new THREE.Group();
+scene.add(modelGroup);
+let modelMesh = null;
+const TARGET_SIZE = 3.2;
+
+// Ellipsoid-Approximation (grobe Fern-Umlenkung)
+const flow = {
+  center: new THREE.Vector3(0, 1.1, 0),
+  half: new THREE.Vector3(1.6, 1.0, 1.0),
+};
+
+const loading = document.getElementById('loading');
+
+function disposeModel() {
+  if (!modelMesh) return;
+  modelGroup.remove(modelMesh);
+  modelMesh.geometry.dispose();
+  modelMesh.material.dispose();
+  modelMesh = null;
+}
+
+/* Original-Geometrie + Nutzer-Ausrichtung (wird immer frisch angewendet,
+   damit sich Rundungsfehler nicht aufsummieren) */
+let rawGeometry = null;
+const orient = { rx: 0, ry: 0, rz: 0, scale: 1 };
+
+function loadModel(geometry) {
+  rawGeometry = geometry;
+  orient.rx = 0; orient.ry = 0; orient.rz = 0; orient.scale = 1;
+  const sc = document.getElementById('scale');
+  sc.value = 100;
+  document.getElementById('v-scale').textContent = '100 %';
+  applyOrientation();
+}
+
+function applyOrientation() {
+  if (!rawGeometry) return;
+  const g = rawGeometry.clone();
+  if (orient.rx) g.rotateX(THREE.MathUtils.degToRad(orient.rx));
+  if (orient.ry) g.rotateY(THREE.MathUtils.degToRad(orient.ry));
+  if (orient.rz) g.rotateZ(THREE.MathUtils.degToRad(orient.rz));
+  setModelFromGeometry(g);
+}
+
+function setModelFromGeometry(geometry) {
+  disposeModel();
+  geometry.computeVertexNormals();
+  geometry = geometry.toNonIndexed();
+
+  geometry.computeBoundingBox();
+  const bb = geometry.boundingBox;
+  const size = new THREE.Vector3(); bb.getSize(size);
+  const center = new THREE.Vector3(); bb.getCenter(center);
+  const scale = TARGET_SIZE * orient.scale / Math.max(size.x, size.y, size.z);
+  geometry.translate(-center.x, -center.y, -center.z);
+  geometry.scale(scale, scale, scale);
+  geometry.computeBoundingBox();
+  geometry.translate(0, -geometry.boundingBox.min.y, 0);
+  geometry.computeBoundingBox();
+  const c2 = new THREE.Vector3(); geometry.boundingBox.getCenter(c2);
+
+  const material = new THREE.MeshStandardMaterial({
+    color: 0x9aa7bd, metalness: 0.25, roughness: 0.45,
+    vertexColors: false, side: THREE.DoubleSide,
+  });
+  modelMesh = new THREE.Mesh(geometry, material);
+  modelGroup.add(modelMesh);
+
+  const s = new THREE.Vector3(); geometry.boundingBox.getSize(s);
+  flow.center.set(0, c2.y, 0);
+  flow.half.set(Math.max(s.x/2, 0.2) * 1.06, Math.max(s.y/2, 0.2) * 1.06, Math.max(s.z/2, 0.2) * 1.06);
+
+  controls.target.copy(flow.center);
+  buildFlowField();
+  applyPressureColors();
+  rebuildStreamlines();
+  updateSlice();
+  updateStats();
+}
+
+/* ============================================================
+   Demo-Objekte
+============================================================ */
+function demoCar() {
+  const parts = [];
+  const body = new RoundedBoxGeometry(3.4, 0.85, 1.5, 4, 0.28);
+  body.translate(0, 0.75, 0);
+  parts.push(body);
+  const cabin = new RoundedBoxGeometry(1.7, 0.72, 1.25, 4, 0.3);
+  cabin.translate(-0.15, 1.45, 0);
+  parts.push(cabin);
+  for (const [x, z] of [[-1.1, 0.78], [-1.1, -0.78], [1.1, 0.78], [1.1, -0.78]]) {
+    const w = new THREE.CylinderGeometry(0.36, 0.36, 0.24, 24);
+    w.rotateX(Math.PI/2);
+    w.translate(x, 0.36, z);
+    parts.push(w);
+  }
+  return mergeGeometries(parts.map(g => g.toNonIndexed()));
+}
+function demoSphere() { return new THREE.SphereGeometry(1.4, 48, 32); }
+function demoCapsule() {
+  const g = new THREE.CapsuleGeometry(0.75, 2.2, 8, 24);
+  g.rotateZ(Math.PI/2);
+  return g;
+}
+
+/* ============================================================
+   Datei-Upload
+============================================================ */
+const dropzone = document.getElementById('dropzone');
+const fileInput = document.getElementById('file-input');
+
+dropzone.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', () => { if (fileInput.files[0]) loadFile(fileInput.files[0]); });
+['dragover','dragenter'].forEach(ev => document.body.addEventListener(ev, e => { e.preventDefault(); dropzone.classList.add('drag'); }));
+['dragleave','drop'].forEach(ev => document.body.addEventListener(ev, e => { e.preventDefault(); dropzone.classList.remove('drag'); }));
+document.body.addEventListener('drop', e => { const f = e.dataTransfer.files[0]; if (f) loadFile(f); });
+
+function extractGeometry(object3d) {
+  const geos = [];
+  object3d.traverse(o => {
+    if (o.isMesh && o.geometry) {
+      const g = o.geometry.clone();
+      o.updateWorldMatrix(true, false);
+      g.applyMatrix4(o.matrixWorld);
+      for (const name of Object.keys(g.attributes)) if (name !== 'position') g.deleteAttribute(name);
+      geos.push(g.toNonIndexed());
+    }
+  });
+  if (!geos.length) throw new Error('Kein Mesh gefunden');
+  const merged = mergeGeometries(geos);
+  merged.computeVertexNormals();
+  return merged;
+}
+
+/* --- .blend: Dekompression (Blender 3.0+ speichert zstd, ältere gzip) --- */
+async function decodeBlendBuffer(buf) {
+  const u8 = new Uint8Array(buf);
+  const magic = String.fromCharCode(...u8.subarray(0, 7));
+  if (magic === 'BLENDER') return buf;
+  if (u8[0] === 0x28 && u8[1] === 0xb5 && u8[2] === 0x2f && u8[3] === 0xfd) {
+    const out = zstdDecompress(u8);
+    return out.buffer.slice(out.byteOffset, out.byteOffset + out.byteLength);
+  }
+  if (u8[0] === 0x1f && u8[1] === 0x8b) {
+    const ds = new DecompressionStream('gzip');
+    return await new Response(new Blob([buf]).stream().pipeThrough(ds)).arrayBuffer();
+  }
+  throw new Error('Keine gültige .blend-Datei');
+}
+
+/* --- .blend: Mesh-Daten aus geparster Datei extrahieren --- */
+function blendFileToGeometry(bfile) {
+  const meshes = (bfile.objects && bfile.objects.Mesh) || [];
+  if (!meshes.length) throw new Error('Kein Mesh in der .blend-Datei gefunden');
+  const geos = [];
+
+  for (const m of meshes) {
+    let positions = null;   // Float32Array [totvert*3], Blender-Koordinaten
+    let polyOffsets = null; // Startindex je Polygon + Endsentinel
+    let cornerVerts = null; // Vertex-Index je Loop-Ecke
+
+    if (m.mvert && m.mpoly && m.mloop) {
+      // Legacy-Layout (Blender ≤ 3.5)
+      const verts = m.mvert, polys = m.mpoly, loops = m.mloop;
+      const nv = verts.length ?? m.totvert;
+      positions = new Float32Array(nv * 3);
+      for (let i = 0; i < nv; i++) {
+        const v = verts[i] || verts;
+        positions[i*3] = v.co[0]; positions[i*3+1] = v.co[1]; positions[i*3+2] = v.co[2];
+      }
+      const np = polys.length ?? m.totpoly;
+      polyOffsets = new Int32Array(np + 1);
+      const nl = loops.length ?? m.totloop;
+      cornerVerts = new Int32Array(nl);
+      for (let i = 0; i < nl; i++) cornerVerts[i] = (loops[i] || loops).v;
+      let sorted = [];
+      for (let i = 0; i < np; i++) { const p = polys[i] || polys; sorted.push([p.loopstart, p.totloop]); }
+      sorted.sort((a, b) => a[0] - b[0]);
+      for (let i = 0; i < np; i++) polyOffsets[i] = sorted[i][0];
+      polyOffsets[np] = nl;
+    } else if (m.vdata) {
+      // Modernes Layout (Blender 3.6+ / 4.x): generische Attribut-Layer
+      const findLayer = (cd, name) => {
+        if (!cd || !cd.layers) return null;
+        const layers = Array.isArray(cd.layers) ? cd.layers : [cd.layers];
+        for (const l of layers) if (l && l.name === name) return l;
+        return null;
+      };
+      const posLayer = findLayer(m.vdata, 'position');
+      const cornerLayer = findLayer(m.ldata, '.corner_vert');
+      const posData = posLayer && posLayer.data;
+      const cornerData = cornerLayer && cornerLayer.data;
+      const offPtr = m.poly_offset_indices && m.poly_offset_indices.__data_address__;
+      if (posData && cornerData && offPtr) {
+        const nv = m.totvert;
+        positions = new Float32Array(nv * 3);
+        for (let i = 0; i < nv; i++) {
+          const v = posData[i];
+          positions[i*3] = v.x; positions[i*3+1] = v.y; positions[i*3+2] = v.z;
+        }
+        const nl = m.totloop;
+        cornerVerts = new Int32Array(nl);
+        for (let i = 0; i < nl; i++) {
+          const c = cornerData[i];
+          cornerVerts[i] = typeof c === 'number' ? c : c.i;
+        }
+        // Polygon-Offsets liegen als roher int32-Block in der Datei
+        const dv = bfile.dv;
+        polyOffsets = new Int32Array(m.totpoly + 1);
+        for (let i = 0; i <= m.totpoly; i++) polyOffsets[i] = dv.getInt32(offPtr + i * 4, true);
+      }
+    }
+
+    if (!positions || !polyOffsets || !cornerVerts) continue;
+
+    // Polygone als Dreiecks-Fächer triangulieren, Blender (Z-up) → three.js (Y-up)
+    const tri = [];
+    for (let p = 0; p < polyOffsets.length - 1; p++) {
+      const start = polyOffsets[p], end = polyOffsets[p+1];
+      for (let k = start + 1; k < end - 1; k++) {
+        for (const idx of [start, k, k + 1]) {
+          const v = cornerVerts[idx] * 3;
+          tri.push(positions[v], positions[v+2], -positions[v+1]);
+        }
+      }
+    }
+    if (!tri.length) continue;
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(tri, 3));
+    geos.push(g);
+  }
+
+  if (!geos.length) {
+    throw new Error('Mesh-Daten konnten nicht gelesen werden. Bitte aus Blender als GLB exportieren (Datei → Exportieren → glTF 2.0).');
+  }
+  const merged = mergeGeometries(geos);
+  merged.computeVertexNormals();
+  return merged;
+}
+
+/* --- .blend: Raw-Parser für das neue Dateiformat (Blender 4.5+/5.x, "BLENDER17")
+   Nötig, weil js.blend das neue Format nicht kennt und Blockadressen darin
+   nicht mehr global eindeutig sind (Pointer gelten nur innerhalb einer ID). --- */
+function parseBlend17(rawBuf) {
+  const u8 = new Uint8Array(rawBuf);
+  const dv = new DataView(rawBuf);
+  const ascii = (o, n) => {
+    let s = '';
+    for (let i = 0; i < n; i++) s += String.fromCharCode(u8[o + i]);
+    return s;
+  };
+  const cstr = (o) => {
+    let e = o;
+    while (u8[e] !== 0) e++;
+    return ascii(o, e - o);
+  };
+
+  // --- 1) Alle Blöcke einsammeln (LargeBHead8: code, sdna, old, len, nr) ---
+  const blocks = [];
+  let o = 17;
+  let dnaBlock = null;
+  while (o + 32 <= u8.length) {
+    const code = ascii(o, 4);
+    if (code === 'ENDB') break;
+    const b = {
+      code,
+      sdna: dv.getInt32(o + 4, true),
+      old: dv.getBigUint64(o + 8, true),
+      len: Number(dv.getBigInt64(o + 16, true)),
+      off: o + 32,
+    };
+    blocks.push(b);
+    if (code === 'DNA1') dnaBlock = b;
+    o += 32 + b.len;
+  }
+  if (!dnaBlock) throw new Error('DNA1-Block nicht gefunden');
+
+  // --- 2) DNA parsen: Struct-Indizes + Feld-Offsets ---
+  const base = dnaBlock.off;
+  let p = base + 8; // "SDNA" + "NAME" überspringen
+  const align4 = () => { const r = (p - base) % 4; if (r) p += 4 - r; };
+  const nNames = dv.getInt32(p, true); p += 4;
+  const names = [];
+  for (let i = 0; i < nNames; i++) { const s = cstr(p); names.push(s); p += s.length + 1; }
+  align4(); p += 4; // "TYPE"
+  const nTypes = dv.getInt32(p, true); p += 4;
+  const types = [];
+  for (let i = 0; i < nTypes; i++) { const s = cstr(p); types.push(s); p += s.length + 1; }
+  align4(); p += 4; // "TLEN"
+  const tlens = [];
+  for (let i = 0; i < nTypes; i++) { tlens.push(dv.getInt16(p, true)); p += 2; }
+  align4(); p += 4; // "STRC"
+  const nStruct = dv.getInt32(p, true); p += 4;
+  const structIdx = {};   // Struct-Name -> SDNA-Index
+  const structDefs = [];  // je Struct: [{type, name}, ...]
+  for (let i = 0; i < nStruct; i++) {
+    const t = dv.getInt16(p, true); p += 2;
+    const nf = dv.getInt16(p, true); p += 2;
+    const fields = [];
+    for (let f = 0; f < nf; f++) {
+      const ft = dv.getInt16(p, true); p += 2;
+      const fn = dv.getInt16(p, true); p += 2;
+      fields.push({ type: types[ft], name: names[fn], size: tlens[ft] });
+    }
+    structIdx[types[t]] = i;
+    structDefs.push(fields);
+  }
+
+  // Feld-Offsets eines Structs berechnen (Pointer = 8 Byte, Arrays via Namens-Suffix)
+  function fieldOffsets(sdnaIndex) {
+    const out = {};
+    let off = 0;
+    for (const f of structDefs[sdnaIndex]) {
+      const m = f.name.match(/^(\*?)\*?(\w+)(?:\[(\d+)\])?(?:\[(\d+)\])?/);
+      const isPtr = f.name.startsWith('*') || f.name.includes('(');
+      let count = 1;
+      if (m && m[3]) count *= parseInt(m[3]);
+      if (m && m[4]) count *= parseInt(m[4]);
+      const name = m ? m[2] : f.name;
+      out[name] = off;
+      off += (isPtr ? 8 : f.size) * count;
+    }
+    out.__size = off;
+    return out;
+  }
+
+  const MESH = structIdx['Mesh'];
+  const ATTR = structIdx['Attribute'];
+  const AARR = structIdx['AttributeArray'];
+  if (MESH === undefined || ATTR === undefined) {
+    throw new Error('Mesh/Attribute-Structs nicht in der DNA gefunden');
+  }
+  const meshF = fieldOffsets(MESH);
+
+  // --- 3) Meshes extrahieren: Pointer LOKAL auflösen (ME-Block + folgende DATA-Blöcke) ---
+  const TRI_BUDGET = 3_000_000;
+  let totalTris = 0;
+  const geos = [];
+  for (let bi = 0; bi < blocks.length; bi++) {
+    const blk = blocks[bi];
+    if (!(blk.code.startsWith('ME') && blk.sdna === MESH)) continue;
+
+    const local = new Map();
+    local.set(blk.old, blk);
+    for (let j = bi + 1; j < blocks.length; j++) {
+      if (blocks[j].code !== 'DATA') break;
+      if (!local.has(blocks[j].old)) local.set(blocks[j].old, blocks[j]);
+    }
+    const deref = (ptr) => local.get(ptr) || null;
+
+    const mo = blk.off;
+    const totpoly = dv.getInt32(mo + meshF.totpoly, true);
+    const attrArrPtr = dv.getBigUint64(mo + meshF.attribute_storage + 0, true);
+    const attrNum = dv.getInt32(mo + meshF.attribute_storage + 8, true);
+    const polyOffBlock = deref(dv.getBigUint64(mo + meshF.poly_offset_indices, true));
+    const attrBlock = deref(attrArrPtr);
+    if (!attrBlock || !polyOffBlock || totpoly <= 0) continue;
+
+    // Attribut-Array durchsuchen: name(*char @0), data(*void @16), Stride 24
+    let positions = null, cornerVerts = null;
+    for (let a = 0; a < attrNum; a++) {
+      const ao = attrBlock.off + a * 24;
+      const nameBlk = deref(dv.getBigUint64(ao, true));
+      if (!nameBlk) continue;
+      const aname = cstr(nameBlk.off);
+      if (aname !== 'position' && aname !== '.corner_vert') continue;
+      const storBlk = deref(dv.getBigUint64(ao + 16, true));
+      if (!storBlk) continue;
+      // AttributeArray: data*, sharing_info*, int64 size
+      const dataBlk = deref(dv.getBigUint64(storBlk.off, true));
+      const count = Number(dv.getBigInt64(storBlk.off + 16, true));
+      if (!dataBlk || count <= 0) continue;
+      // slice() kopiert — Blockdaten sind nicht 4-Byte-aligned, direkte Views schlagen fehl
+      if (aname === 'position') {
+        positions = new Float32Array(rawBuf.slice(dataBlk.off, dataBlk.off + count * 12));
+      } else {
+        cornerVerts = new Int32Array(rawBuf.slice(dataBlk.off, dataBlk.off + count * 4));
+      }
+    }
+    if (!positions || !cornerVerts) continue;
+
+    const polyOff = new Int32Array(rawBuf.slice(polyOffBlock.off, polyOffBlock.off + (totpoly + 1) * 4));
+
+    // Dreiecksbudget VOR dem Triangulieren prüfen (große Szenen frieren sonst den Browser ein)
+    let triCount = 0;
+    for (let f = 0; f < totpoly; f++) {
+      const n = polyOff[f + 1] - polyOff[f];
+      if (n >= 3) triCount += n - 2;
+    }
+    totalTris += triCount;
+    if (totalTris > TRI_BUDGET) {
+      throw new Error('Szene zu groß (über ' + Math.round(TRI_BUDGET / 1e6) + ' Mio. Dreiecke). Bitte nur das gewünschte Objekt exportieren oder das Mesh reduzieren.');
+    }
+    if (!triCount) continue;
+
+    // Triangulieren (Fächer), Blender (Z-up) -> three.js (Y-up)
+    const tri = new Float32Array(triCount * 9);
+    let w = 0;
+    for (let f = 0; f < totpoly; f++) {
+      const start = polyOff[f], end = polyOff[f + 1];
+      for (let k = start + 1; k < end - 1; k++) {
+        for (const idx of [start, k, k + 1]) {
+          const v = cornerVerts[idx] * 3;
+          tri[w++] = positions[v];
+          tri[w++] = positions[v + 2];
+          tri[w++] = -positions[v + 1];
+        }
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(tri, 3));
+    geos.push(g);
+  }
+
+  if (!geos.length) {
+    throw new Error('Kein Mesh in der .blend-Datei gefunden. Bitte aus Blender als GLB exportieren (Datei → Exportieren → glTF 2.0).');
+  }
+  const merged = mergeGeometries(geos);
+  merged.computeVertexNormals();
+  return merged;
+}
+
+async function loadBlend(buf) {
+  const raw = await decodeBlendBuffer(buf);
+  const u8 = new Uint8Array(raw);
+  // Neues Format (Blender 4.5+/5.x): eigener Parser; sonst js.blend
+  if (String.fromCharCode(...u8.subarray(0, 9)) === 'BLENDER17') {
+    return parseBlend17(raw);
+  }
+  const result = await JSBLEND(raw);
+  window.__blendDebug = result.file;
+  return blendFileToGeometry(result.file);
+}
+
+async function loadFile(file) {
+  const ext = file.name.split('.').pop().toLowerCase();
+  loading.classList.add('on');
+  await new Promise(r => setTimeout(r, 30)); // Spinner rendern lassen
+  try {
+    const buf = await file.arrayBuffer();
+    let geometry;
+    if (ext === 'stl') {
+      geometry = new STLLoader().parse(buf);
+    } else if (ext === 'obj') {
+      const text = new TextDecoder().decode(buf);
+      geometry = extractGeometry(new OBJLoader().parse(text));
+    } else if (ext === 'glb' || ext === 'gltf') {
+      const gltf = await new GLTFLoader().parseAsync(buf, '');
+      geometry = extractGeometry(gltf.scene);
+    } else if (ext === 'blend') {
+      geometry = await loadBlend(buf);
+    } else {
+      alert('Format nicht unterstützt. Bitte STL, OBJ, GLB/GLTF oder BLEND verwenden.');
+      return;
+    }
+    loadModel(geometry);
+  } catch (err) {
+    console.error(err);
+    alert('Datei konnte nicht geladen werden: ' + err.message);
+  } finally {
+    loading.classList.remove('on');
+    fileInput.value = '';
+  }
+}
+
+/* ============================================================
+   Signed-Distance-Field (mesh-genaue Umströmung)
+   Alles im Modellraum (Geometrie-Koordinaten).
+============================================================ */
+const sdf = {
+  data: null,          // Float32Array, signierte Distanz
+  dims: [0, 0, 0],
+  origin: new THREE.Vector3(),
+  cell: new THREE.Vector3(),
+  sil: null,           // Float32Array [ny*nz], Silhouette 0..1 (Wind-Schatten)
+  silMaxX: null,       // Float32Array [ny*nz], hinterste Objektkante je Spalte
+  maxX: 0,
+};
+
+function buildFlowField() {
+  const geo = modelMesh.geometry;
+  geo.computeBoundingBox();
+  const bvh = new MeshBVH(geo);
+  const bb = geo.boundingBox;
+  const pad = 0.9;
+  const min = new THREE.Vector3(bb.min.x - pad, Math.max(bb.min.y - pad, -0.05), bb.min.z - pad);
+  const max = new THREE.Vector3(bb.max.x + pad, bb.max.y + pad, bb.max.z + pad);
+
+  const dims = [44, 30, 30];
+  const cell = new THREE.Vector3(
+    (max.x - min.x) / dims[0],
+    (max.y - min.y) / dims[1],
+    (max.z - min.z) / dims[2],
+  );
+  const [nx, ny, nz] = dims;
+  const data = new Float32Array(nx * ny * nz);
+  const inside = new Uint8Array(nx * ny * nz);
+  const sil = new Float32Array(ny * nz);
+  const silMaxX = new Float32Array(ny * nz).fill(min.x);
+
+  // 1) Innen/Außen per Spalten-Raycast entlang +x (Paritätsregel)
+  const ray = new THREE.Ray(new THREE.Vector3(), new THREE.Vector3(1, 0, 0));
+  for (let k = 0; k < nz; k++) {
+    for (let j = 0; j < ny; j++) {
+      const yc = min.y + (j + 0.5) * cell.y;
+      const zc = min.z + (k + 0.5) * cell.z;
+      ray.origin.set(min.x - 1, yc, zc);
+      const hits = [];
+      bvh.shapecast({
+        intersectsBounds: box => ray.intersectsBox(box),
+        intersectsTriangle: tri => {
+          const p = new THREE.Vector3();
+          if (ray.intersectTriangle(tri.a, tri.b, tri.c, false, p)) hits.push(p.x);
+          return false;
+        },
+      });
+      hits.sort((a, b) => a - b);
+      // Doppelte (Kanten-Treffer) grob entdupen
+      const xs = hits.filter((x, idx) => idx === 0 || x - hits[idx-1] > 1e-4);
+      if (xs.length >= 2) {
+        const col = j + k * ny;
+        sil[col] = 1;
+        silMaxX[col] = xs[xs.length - 1];
+        for (let i = 0; i < nx; i++) {
+          const xc = min.x + (i + 0.5) * cell.x;
+          let cnt = 0;
+          for (const h of xs) if (h < xc) cnt++;
+          if (cnt % 2 === 1) inside[i + j*nx + k*nx*ny] = 1;
+        }
+      }
+    }
+  }
+
+  // 2) Unsignierte Distanz per BVH-Closest-Point (nur nahe der Box exakt)
+  const target = { point: new THREE.Vector3(), distance: 0, faceIndex: 0 };
+  const p = new THREE.Vector3();
+  for (let k = 0; k < nz; k++) {
+    for (let j = 0; j < ny; j++) {
+      for (let i = 0; i < nx; i++) {
+        p.set(min.x + (i + 0.5) * cell.x, min.y + (j + 0.5) * cell.y, min.z + (k + 0.5) * cell.z);
+        bvh.closestPointToPoint(p, target, 0, pad * 1.4);
+        const idx = i + j*nx + k*nx*ny;
+        const d = target.distance ?? pad * 1.4;
+        data[idx] = inside[idx] ? -d : d;
+      }
+    }
+  }
+
+  // 3) Silhouette leicht weichzeichnen (schönerer Nachlauf-Rand)
+  const silSmooth = new Float32Array(ny * nz);
+  for (let k = 0; k < nz; k++) {
+    for (let j = 0; j < ny; j++) {
+      let sum = 0, cnt = 0;
+      for (let dk = -1; dk <= 1; dk++) for (let dj = -1; dj <= 1; dj++) {
+        const jj = j + dj, kk = k + dk;
+        if (jj < 0 || jj >= ny || kk < 0 || kk >= nz) continue;
+        sum += sil[jj + kk*ny]; cnt++;
+      }
+      silSmooth[j + k*ny] = sum / cnt;
+    }
+  }
+
+  sdf.data = data;
+  sdf.dims = dims;
+  sdf.origin.copy(min);
+  sdf.cell.copy(cell);
+  sdf.sil = silSmooth;
+  sdf.silMaxX = silMaxX;
+  sdf.maxX = bb.max.x;
+}
+
+function sdfSample(x, y, z) {
+  if (!sdf.data) return 10;
+  const [nx, ny, nz] = sdf.dims;
+  const fx = (x - sdf.origin.x) / sdf.cell.x - 0.5;
+  const fy = (y - sdf.origin.y) / sdf.cell.y - 0.5;
+  const fz = (z - sdf.origin.z) / sdf.cell.z - 0.5;
+  if (fx < 0 || fy < 0 || fz < 0 || fx >= nx - 1 || fy >= ny - 1 || fz >= nz - 1) {
+    // außerhalb des Gitters: sicher weit weg
+    return 2.0;
+  }
+  const i0 = Math.floor(fx), j0 = Math.floor(fy), k0 = Math.floor(fz);
+  const tx = fx - i0, ty = fy - j0, tz = fz - k0;
+  const d = sdf.data, sx = 1, sy = nx, sz = nx * ny;
+  const b = i0 + j0*sy + k0*sz;
+  const c000 = d[b], c100 = d[b+sx], c010 = d[b+sy], c110 = d[b+sx+sy];
+  const c001 = d[b+sz], c101 = d[b+sx+sz], c011 = d[b+sy+sz], c111 = d[b+sx+sy+sz];
+  const c00 = c000 + (c100 - c000) * tx;
+  const c10 = c010 + (c110 - c010) * tx;
+  const c01 = c001 + (c101 - c001) * tx;
+  const c11 = c011 + (c111 - c011) * tx;
+  const c0 = c00 + (c10 - c00) * ty;
+  const c1 = c01 + (c11 - c01) * ty;
+  return c0 + (c1 - c0) * tz;
+}
+
+const _gradTmp = new THREE.Vector3();
+function sdfGrad(x, y, z, out) {
+  const h = Math.min(sdf.cell.x, sdf.cell.y, sdf.cell.z) * 0.75;
+  out.set(
+    sdfSample(x + h, y, z) - sdfSample(x - h, y, z),
+    sdfSample(x, y + h, z) - sdfSample(x, y - h, z),
+    sdfSample(x, y, z + h) - sdfSample(x, y, z - h),
+  );
+  const len = out.length();
+  if (len > 1e-6) out.divideScalar(len);
+  return out;
+}
+
+function silhouetteAt(y, z) {
+  if (!sdf.sil) return 0;
+  const [, ny, nz] = sdf.dims;
+  const fy = (y - sdf.origin.y) / sdf.cell.y - 0.5;
+  const fz = (z - sdf.origin.z) / sdf.cell.z - 0.5;
+  if (fy < 0 || fz < 0 || fy >= ny - 1 || fz >= nz - 1) return 0;
+  const j0 = Math.floor(fy), k0 = Math.floor(fz);
+  const ty = fy - j0, tz = fz - k0;
+  const s = sdf.sil, b = j0 + k0*ny;
+  const c0 = s[b] + (s[b+1] - s[b]) * ty;
+  const c1 = s[b+ny] + (s[b+1+ny] - s[b+ny]) * ty;
+  return c0 + (c1 - c0) * tz;
+}
+
+function silMaxXAt(y, z) {
+  if (!sdf.silMaxX) return 0;
+  const [, ny, nz] = sdf.dims;
+  const j = Math.min(ny - 1, Math.max(0, Math.round((y - sdf.origin.y) / sdf.cell.y - 0.5)));
+  const k = Math.min(nz - 1, Math.max(0, Math.round((z - sdf.origin.z) / sdf.cell.z - 0.5)));
+  return sdf.silMaxX[j + k*ny];
+}
+
+/* ============================================================
+   Strömungsfeld
+   Basis: Potentialströmung um Ellipsoid (Fernfeld)
+   + SDF-Korrektur an der Oberfläche (mesh-genau)
+   + Nachlauf-Turbulenz hinter dem Objekt
+============================================================ */
+const _p = new THREE.Vector3(), _rhat = new THREE.Vector3(), _ur = new THREE.Vector3(), _ut = new THREE.Vector3();
+const _U = new THREE.Vector3(), _n = new THREE.Vector3();
+const SURF_CLEAR = 0.5;   // Einflusszone der Oberfläche
+let wakeEnabled = true;
+
+function windVelocity(pos, out) {
+  const yaw = -modelGroup.rotation.y;
+  const cos = Math.cos(yaw), sin = Math.sin(yaw);
+
+  // --- Modellraum-Koordinaten ---
+  _p.copy(pos).sub(flow.center);
+  const pmx = _p.x * cos - _p.z * sin + flow.center.x;
+  const pmy = pos.y;
+  const pmz = _p.x * sin + _p.z * cos + flow.center.z;
+
+  // --- 1) Ellipsoid-Potentialströmung (Fernfeld) ---
+  _p.set((pmx - flow.center.x) / flow.half.x, (pmy - flow.center.y) / flow.half.y, (pmz - flow.center.z) / flow.half.z);
+  _U.set(1 / flow.half.x, 0, 0); // Wind im Modellraum = +x
+  const r = _p.length();
+  if (r < 1e-5) { out.set(0, 0, 0); return out; }
+  _rhat.copy(_p).divideScalar(r);
+  const rr = Math.max(r, 0.85);
+  const kk = 1 / (rr * rr * rr);
+  const udotr = _U.dot(_rhat);
+  _ur.copy(_rhat).multiplyScalar(udotr);
+  _ut.copy(_U).sub(_ur);
+  _ur.multiplyScalar(Math.max(0, 1 - kk));
+  _ut.multiplyScalar(1 + kk * 0.5);
+  out.copy(_ur).add(_ut);
+  out.set(out.x * flow.half.x, out.y * flow.half.y, out.z * flow.half.z); // zurückskalieren
+
+  // --- 2) SDF-Korrektur: Stromlinien schmiegen sich ans Mesh ---
+  const d = sdfSample(pmx, pmy, pmz);
+  if (d < SURF_CLEAR) {
+    sdfGrad(pmx, pmy, pmz, _n);
+    const f = 1 - Math.max(0, d) / SURF_CLEAR;
+    const vn = out.dot(_n);
+    if (vn < 0) out.addScaledVector(_n, -vn * f * f * 0.98);
+    if (d < 0.06) out.addScaledVector(_n, (0.06 - d) * 2.5); // aus dem Objekt herausdrücken
+  }
+
+  // --- 3) Nachlauf-Turbulenz ---
+  if (wakeEnabled) {
+    const tailX = silMaxXAt(pmy, pmz);
+    if (pmx > tailX - 0.15) {
+      const shadow = silhouetteAt(pmy, pmz);
+      if (shadow > 0.03) {
+        const dx = pmx - tailX;
+        const decay = Math.exp(-dx / (flow.half.x * 2.2));
+        const w = shadow * Math.min(1, 0.25 + dx * 1.6) * decay;
+        if (w > 0.01) {
+          // Geschwindigkeitsdefizit im Windschatten
+          out.multiplyScalar(1 - 0.55 * w);
+          // Pseudo-turbulente Wirbel (statisches Curl-artiges Feld)
+          // Zwei Oktaven: grobe Walzen + feine Wirbel für granulare Struktur
+          const sy = Math.sin(4.1 * pmy + 2.6 * pmx) * Math.cos(3.3 * pmz + 1.1 * pmx)
+                   + 0.55 * Math.sin(9.7 * pmy + 5.3 * pmx + 0.8) * Math.cos(8.1 * pmz + 3.7 * pmx);
+          const sz = Math.sin(3.7 * pmz + 2.1 * pmx + 1.7) * Math.cos(4.3 * pmy - 1.3 * pmx)
+                   + 0.55 * Math.sin(8.9 * pmz + 4.7 * pmx + 2.3) * Math.cos(9.3 * pmy - 3.1 * pmx);
+          const sx = Math.sin(2.9 * (pmy + pmz) + 3.1 * pmx) * 0.4
+                   + 0.25 * Math.sin(7.7 * (pmy - pmz) + 6.1 * pmx);
+          out.x += sx * w * 0.62;
+          out.y += sy * w * 0.62;
+          out.z += sz * w * 0.62;
+        }
+      }
+    }
+  }
+
+  // --- zurück in Weltkoordinaten ---
+  const ox = out.x * cos + out.z * sin;
+  const oz = -out.x * sin + out.z * cos;
+  out.x = ox; out.z = oz;
+  return out;
+}
+
+/* ============================================================
+   Stromlinien
+============================================================ */
+const streamGroup = new THREE.Group();
+scene.add(streamGroup);
+let streamMesh = null;
+let streamUniforms = null;
+
+let renderMode = 'vortex'; // 'vortex' | 'beams'
+const STEPS = 200;
+const DT = 0.08;
+const X_START = -9, X_END = 11;
+const _vel = new THREE.Vector3(), _mid = new THREE.Vector3();
+
+function rebuildStreamlines() {
+  if (streamMesh) {
+    streamGroup.remove(streamMesh);
+    streamMesh.geometry.dispose();
+    streamMesh.material.dispose();
+    streamMesh = null;
+  }
+  const count = parseInt(document.getElementById('lines').value);
+
+  streamUniforms = {
+    uTime: { value: 0 },
+    uAnimate: { value: 1 },
+    uFrontX: { value: flow.center.x - flow.half.x },
+    uTailX: { value: flow.center.x + flow.half.x * 0.55 },
+  };
+
+  if (renderMode === 'vortex') {
+    buildVortexFilaments(count);
+    return;
+  }
+
+  const seeds = [];
+  const spanY = flow.half.y * 2.6 + 0.6;
+  const spanZ = flow.half.z * 2.8 + 0.6;
+
+  // Deterministischer PRNG, damit das Feld bei gleichem Slider-Wert stabil bleibt
+  let rngState = 1337;
+  const rng = () => {
+    rngState = (rngState * 1664525 + 1013904223) >>> 0;
+    return rngState / 4294967296;
+  };
+
+  // Seeds gezielt dort säen, wo sie den Körper streifen: dichte Wolke um die
+  // Silhouette (Wirbelschicht + Nachlauf), plus lockere Hülle drumherum.
+  const yMax = flow.center.y + flow.half.y * 1.35 + 0.35;
+  const zMax = flow.half.z * 1.5 + 0.45;
+  // Alle Seeds treffen das Modell: nur innerhalb der Wind-Silhouette säen
+  let tries = 0;
+  while (seeds.length < count && tries < count * 200) {
+    tries++;
+    const y = 0.06 + rng() * (yMax - 0.06);
+    const z = flow.center.z + (rng() * 2 - 1) * zMax;
+    if (silhouetteAt(y, z) > 0.35) {
+      seeds.push(new THREE.Vector3(X_START, y, z));
+    }
+  }
+
+  // Alle Linien einmal integrieren, danach je nach Darstellung aufbereiten
+  const lines = [];
+  seeds.forEach(seed => {
+    const pts = [], speeds = [];
+    const p = seed.clone();
+    for (let s = 0; s < STEPS; s++) {
+      windVelocity(p, _vel);
+      const sp = _vel.length();
+      pts.push(p.clone());
+      speeds.push(sp);
+      _mid.copy(p).addScaledVector(_vel, DT * 0.5);
+      windVelocity(_mid, _vel);
+      p.addScaledVector(_vel, DT);
+      if (p.y < 0.02) p.y = 0.02;
+      if (p.x > X_END) { pts.push(p.clone()); speeds.push(_vel.length()); break; }
+    }
+    lines.push({ pts, speeds });
+  });
+
+  function speedColor(sp) {
+    // CFD-Regenbogen: langsam = blau, mittel = grün/gelb, schnell = orange/rot
+    const t = Math.min(1, Math.max(0, sp / 1.55));
+    const stops = [
+      [0.15, 0.10, 0.95],
+      [0.00, 0.65, 1.00],
+      [0.10, 0.90, 0.30],
+      [0.95, 0.95, 0.10],
+      [1.00, 0.55, 0.05],
+      [0.95, 0.15, 0.05],
+    ];
+    const f = t * (stops.length - 1);
+    const i = Math.min(stops.length - 2, Math.floor(f));
+    const u = f - i;
+    const a = stops[i], b = stops[i + 1];
+    return [a[0]+(b[0]-a[0])*u, a[1]+(b[1]-a[1])*u, a[2]+(b[2]-a[2])*u];
+  }
+
+  const positions = [], colors = [], progress = [], lineId = [];
+  lines.forEach(({ pts, speeds }, si) => {
+    for (let s = 0; s < pts.length - 1; s++) {
+      const a = pts[s], b = pts[s+1];
+      const ta = s / (pts.length - 1), tb = (s+1) / (pts.length - 1);
+      const ca = speedColor(speeds[s]);
+      const cb = speedColor(speeds[s+1]);
+      positions.push(a.x, a.y, a.z, b.x, b.y, b.z);
+      colors.push(...ca, ...cb);
+      progress.push(ta, tb);
+      lineId.push(si, si);
+    }
+  });
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  geo.setAttribute('aProgress', new THREE.Float32BufferAttribute(progress, 1));
+  geo.setAttribute('aLineId', new THREE.Float32BufferAttribute(lineId, 1));
+
+  const mat = new THREE.ShaderMaterial({
+    uniforms: streamUniforms,
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    vertexShader: `
+      attribute float aProgress;
+      attribute float aLineId;
+      varying vec3 vColor;
+      varying float vProgress;
+      varying float vLineId;
+      varying float vWorldX;
+      void main() {
+        vColor = color;
+        vProgress = aProgress;
+        vLineId = aLineId;
+        vWorldX = position.x;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform float uTime;
+      uniform float uAnimate;
+      uniform float uFrontX;
+      varying vec3 vColor;
+      varying float vProgress;
+      varying float vLineId;
+      varying float vWorldX;
+      void main() {
+        float base = 0.30;
+        float pulse = 0.0;
+        if (uAnimate > 0.5) {
+          float phase = fract(vProgress * 3.0 - uTime * 0.55 + vLineId * 0.13);
+          pulse = smoothstep(0.25, 0.0, phase) * 1.1;
+        } else {
+          base = 0.55;
+        }
+        // Anlaufstrecke vor dem Modell dezenter darstellen
+        float upstream = smoothstep(uFrontX - 3.5, uFrontX - 0.2, vWorldX);
+        float vis = mix(0.22, 1.0, upstream);
+        gl_FragColor = vec4(vColor * (base + pulse) * vis, (base + pulse * 0.8) * vis);
+      }
+    `,
+    vertexColors: true,
+  });
+
+  streamMesh = new THREE.LineSegments(geo, mat);
+  streamGroup.add(streamMesh);
+}
+
+/* ============================================================
+   CFD-Wirbelfäden (Vortex-Filamente)
+   - Scherschicht an der Hinterkante (Silhouetten-Rand)
+   - Kelvin-Helmholtz-Aufrollen (anwachsende Roller)
+   - Mehrskalen-Turbulenz (4 Oktaven, Amplituden ~ k^-0.9,
+     Energiekaskade) -> Stretching/Tilting beim Integrieren
+   - Färbung nach Vorticity-Magnitude (numerischer Curl)
+============================================================ */
+const _fm = new THREE.Vector3(), _ft = new THREE.Vector3();
+const _ca = new THREE.Vector3(), _cb = new THREE.Vector3();
+// Oktaven: [Wellenzahl k, Amplitude a] — a faellt ~ k^-0.9 (Kaskade)
+const OCTAVES = [[2.4, 0.42], [5.0, 0.22], [10.5, 0.115], [21.0, 0.06]];
+
+/* Turbulentes Nachlauffeld im Modellraum (nur hinter der Hinterkante) */
+function turbVelModel(x, y, z, out) {
+  out.set(0, 0, 0);
+  const shadow = silhouetteAt(y, z);
+  if (shadow < 0.04) return out;
+  const tail = silMaxXAt(y, z);
+  const xp = x - tail;
+  if (xp < -0.2) return out;
+  // Scherschicht waechst an (KH), klingt weit hinten ab
+  const grow = 1 - Math.exp(-Math.max(0, xp) / 0.55);
+  const decay = Math.exp(-Math.max(0, xp) / (flow.half.x * 3.2));
+  const env = Math.min(1, shadow * 1.3) * grow * decay;
+  if (env < 0.012) return out;
+
+  let vx = 0, vy = 0, vz = 0;
+  // Kelvin-Helmholtz-Roller: Rotation in x/y, in Spannweite (z) moduliert
+  const kh = Math.min(1, xp / 1.4);
+  vy += 0.85 * Math.sin(3.1 * xp + 1.4 * z) * kh;
+  vx += -0.45 * Math.cos(3.1 * xp + 1.4 * z) * kh;
+  vz += 0.25 * Math.sin(3.1 * xp - 2.2 * y + 0.7) * kh;
+  // Oktaven-Turbulenz (pseudo-divergenzfrei, sin/cos-Produkte)
+  for (let o = 0; o < OCTAVES.length; o++) {
+    const k = OCTAVES[o][0], a = OCTAVES[o][1];
+    vx += a * (Math.sin(k * y + 1.7 * o) * Math.cos(k * z - 0.6 * o) * Math.sin(0.9 * k * x + o));
+    vy += a * (Math.sin(k * z + 0.9 * o) * Math.cos(k * x + 1.3 + o) * Math.sin(1.1 * k * y + 2.1));
+    vz += a * (Math.cos(k * x + 0.5 * o) * Math.sin(k * y - 1.2 + o) * Math.cos(1.05 * k * z + 0.7));
+  }
+  out.set(vx * env, vy * env, vz * env);
+  return out;
+}
+
+/* Vorticity-Magnitude: numerischer Curl des Turbulenzfeldes */
+function vorticityMag(x, y, z) {
+  const h = 0.045;
+  turbVelModel(x, y, z + h, _ca); turbVelModel(x, y, z - h, _cb);
+  const vyz = _ca.y - _cb.y, vxz = _ca.x - _cb.x;
+  turbVelModel(x + h, y, z, _ca); turbVelModel(x - h, y, z, _cb);
+  const vyx = _ca.y - _cb.y, vzx = _ca.z - _cb.z;
+  turbVelModel(x, y + h, z, _ca); turbVelModel(x, y - h, z, _cb);
+  const vzy = _ca.z - _cb.z, vxy = _ca.x - _cb.x;
+  const ox = (vzy - vyz) / (2 * h);
+  const oy = (vxz - vzx) / (2 * h);
+  const oz = (vyx - vxy) / (2 * h);
+  return Math.sqrt(ox * ox + oy * oy + oz * oz);
+}
+
+/* Gesamtgeschwindigkeit fuer Filamente: Grundstroemung + Turbulenz */
+function filamentVelocity(pos, out) {
+  windVelocity(pos, out);
+  const yaw = -modelGroup.rotation.y;
+  const cos = Math.cos(yaw), sin = Math.sin(yaw);
+  const dx = pos.x - flow.center.x, dz = pos.z - flow.center.z;
+  const pmx = dx * cos - dz * sin + flow.center.x;
+  const pmz = dx * sin + dz * cos + flow.center.z;
+  turbVelModel(pmx, pos.y, pmz, _ft);
+  out.x += _ft.x * cos + _ft.z * sin;
+  out.y += _ft.y;
+  out.z += -_ft.x * sin + _ft.z * cos;
+  return out;
+}
+
+/* Vorticity -> Farbe: Blau -> Gruen -> Gelb -> Orange */
+function vortColor(t) {
+  const stops = [
+    [0.08, 0.22, 0.95],
+    [0.05, 0.80, 0.55],
+    [0.55, 0.95, 0.15],
+    [1.00, 0.72, 0.08],
+    [1.00, 0.42, 0.04],
+  ];
+  t = Math.min(1, Math.max(0, t));
+  const f = t * (stops.length - 1);
+  const i = Math.min(stops.length - 2, Math.floor(f));
+  const u = f - i, a = stops[i], b = stops[i + 1];
+  return [a[0]+(b[0]-a[0])*u, a[1]+(b[1]-a[1])*u, a[2]+(b[2]-a[2])*u];
+}
+
+function buildVortexFilaments(count) {
+  const nFil = Math.min(5000, Math.round(count * 2.2));
+  const F_STEPS = 60, F_DT = 0.055;
+
+  let rs = 90210;
+  const rng = () => { rs = (rs * 1664525 + 1013904223) >>> 0; return rs / 4294967296; };
+
+  const yaw = modelGroup.rotation.y;
+  const cosB = Math.cos(yaw), sinB = Math.sin(yaw);
+  // Modellraum -> Welt (Umkehrung der Transformation in windVelocity)
+  const toWorld = (mx, my, mz, v) => {
+    const dx = mx - flow.center.x, dz = mz - flow.center.z;
+    v.set(dx * cosB - dz * sinB + flow.center.x, my, dx * sinB + dz * cosB + flow.center.z);
+    return v;
+  };
+
+  const yMax = flow.center.y + flow.half.y * 1.4 + 0.3;
+  const zMax = flow.half.z * 1.6 + 0.3;
+
+  const positions = [], colors = [], progress = [], lineId = [];
+  const seed = new THREE.Vector3();
+  const p = new THREE.Vector3();
+
+  let made = 0, tries = 0;
+  while (made < nFil && tries < nFil * 60) {
+    tries++;
+    const my = 0.05 + rng() * (yMax - 0.05);
+    const mz = flow.center.z + (rng() * 2 - 1) * zMax;
+    const sil = silhouetteAt(my, mz);
+    // Scherschicht: Rand der Silhouette bevorzugen, Kern nur duenn besetzen
+    const edge = sil > 0.12 && sil < 0.92;
+    if (!edge && !(sil >= 0.92 && rng() < 0.22)) continue;
+    const tail = silMaxXAt(my, mz);
+    // Randspalten ohne echte Hinterkante ueberspringen (Default = Gitteranfang)
+    if (tail <= sdf.origin.x + sdf.cell.x) continue;
+    const mx = tail + 0.02 + rng() * 0.5;
+    toWorld(mx, my, mz, seed);
+
+    // Filament durch das Feld integrieren (RK2)
+    p.copy(seed);
+    const pts = [], vort = [];
+    for (let s = 0; s < F_STEPS; s++) {
+      filamentVelocity(p, _fm);
+      _ca.copy(p).addScaledVector(_fm, F_DT * 0.5);
+      filamentVelocity(_ca, _fm);
+      pts.push(p.clone());
+      // Vorticity im Modellraum (alle 3 Schritte, dazwischen interpoliert)
+      if (s % 3 === 0) {
+        const dx = p.x - flow.center.x, dz = p.z - flow.center.z;
+        const pmx = dx * Math.cos(-yaw) - dz * Math.sin(-yaw) + flow.center.x;
+        const pmz = dx * Math.sin(-yaw) + dz * Math.cos(-yaw) + flow.center.z;
+        vort.push(vorticityMag(pmx, p.y, pmz));
+      } else {
+        vort.push(vort[vort.length - 1]);
+      }
+      p.addScaledVector(_fm, F_DT);
+      if (p.y < 0.02) p.y = 0.02;
+      if (p.x > X_END) break;
+    }
+    if (pts.length < 4) continue;
+
+    const id = made + rng();
+    for (let s = 0; s < pts.length - 1; s++) {
+      const a = pts[s], b = pts[s + 1];
+      const ta = s / (pts.length - 1), tb = (s + 1) / (pts.length - 1);
+      const ca = vortColor(0.06 + vort[s] * 0.34);
+      const cb = vortColor(0.06 + vort[s + 1] * 0.34);
+      positions.push(a.x, a.y, a.z, b.x, b.y, b.z);
+      colors.push(ca[0], ca[1], ca[2], cb[0], cb[1], cb[2]);
+      progress.push(ta, tb);
+      lineId.push(id, id);
+    }
+    made++;
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  geo.setAttribute('aProgress', new THREE.Float32BufferAttribute(progress, 1));
+  geo.setAttribute('aLineId', new THREE.Float32BufferAttribute(lineId, 1));
+
+  const mat = new THREE.ShaderMaterial({
+    uniforms: streamUniforms,
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    vertexShader: `
+      uniform float uTime;
+      uniform float uAnimate;
+      attribute float aProgress;
+      attribute float aLineId;
+      varying vec3 vColor;
+      varying float vProgress;
+      varying float vLineId;
+      void main() {
+        vColor = color;
+        vProgress = aProgress;
+        vLineId = aLineId;
+        vec3 pos = position;
+        if (uAnimate > 0.5) {
+          // leichtes Taumeln der Wirbelfaeden, stromabwaerts staerker
+          float amp = 0.008 + aProgress * 0.05;
+          float t = uTime * 1.6 + aLineId * 9.0;
+          pos.x += sin(t + pos.y * 6.0) * amp * 0.5;
+          pos.y += sin(t * 1.2 + pos.z * 7.0) * amp;
+          pos.z += cos(t * 0.9 + pos.x * 5.0) * amp;
+        }
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform float uTime;
+      uniform float uAnimate;
+      varying vec3 vColor;
+      varying float vProgress;
+      varying float vLineId;
+      void main() {
+        float base = 0.5;
+        float pulse = 0.0;
+        if (uAnimate > 0.5) {
+          float phase = fract(vProgress * 2.0 - uTime * 0.45 + vLineId * 0.37);
+          pulse = smoothstep(0.35, 0.0, phase) * 0.7;
+        }
+        // Faden-Enden weich auslaufen lassen
+        float tip = smoothstep(0.0, 0.06, vProgress) * smoothstep(1.0, 0.85, vProgress);
+        float alpha = (base + pulse) * tip;
+        gl_FragColor = vec4(vColor * (0.85 + pulse), alpha);
+      }
+    `,
+    vertexColors: true,
+  });
+
+  streamMesh = new THREE.LineSegments(geo, mat);
+  streamGroup.add(streamMesh);
+}
+
+/* ============================================================
+   Schnittebene mit Druckfeld (cp aus Bernoulli)
+============================================================ */
+let sliceMode = 'off';   // 'off' | 'v' | 'h'
+let sliceMesh = null, sliceTexture = null;
+const SLICE_W = 168, SLICE_H = 112;
+const SLICE_X0 = -6, SLICE_X1 = 10.5;
+const _sp = new THREE.Vector3(), _sv = new THREE.Vector3();
+
+function slicePosRange() {
+  if (sliceMode === 'h') return [0.05, flow.half.y * 2.4 + 0.4];
+  return [-(flow.half.z * 1.8 + 0.5), flow.half.z * 1.8 + 0.5];
+}
+
+function currentSlicePos() {
+  const t = (parseFloat(document.getElementById('slicepos').value) + 100) / 200; // 0..1
+  const [a, b] = slicePosRange();
+  return a + t * (b - a);
+}
+
+function updateSlice() {
+  if (sliceMesh) {
+    scene.remove(sliceMesh);
+    sliceMesh.geometry.dispose();
+    sliceMesh.material.dispose();
+    sliceTexture.dispose();
+    sliceMesh = null;
+  }
+  const posLabel = document.getElementById('v-slicepos');
+  if (sliceMode === 'off') { posLabel.textContent = '–'; return; }
+
+  const pos = currentSlicePos();
+  posLabel.textContent = pos.toFixed(1) + ' m';
+
+  const spanX = SLICE_X1 - SLICE_X0;
+  const spanOther = sliceMode === 'v' ? (flow.half.y * 2.0 + 2.2) : (flow.half.z * 2.4 + 2.6);
+
+  const dataArr = new Uint8Array(SLICE_W * SLICE_H * 4);
+  const yaw = modelGroup.rotation.y;
+  const cosY = Math.cos(-yaw), sinY = Math.sin(-yaw);
+
+  for (let j = 0; j < SLICE_H; j++) {
+    for (let i = 0; i < SLICE_W; i++) {
+      const x = SLICE_X0 + (i / (SLICE_W - 1)) * spanX;
+      let y, z;
+      if (sliceMode === 'v') {
+        y = 0.03 + (j / (SLICE_H - 1)) * spanOther;
+        z = pos;
+      } else {
+        y = pos;
+        z = -spanOther/2 + (j / (SLICE_H - 1)) * spanOther;
+      }
+      _sp.set(x, y, z);
+
+      // im Modellraum prüfen, ob innerhalb des Objekts
+      const rx = (x - flow.center.x) * cosY - (z - flow.center.z) * sinY + flow.center.x;
+      const rz = (x - flow.center.x) * sinY + (z - flow.center.z) * cosY + flow.center.z;
+      const dIn = sdfSample(rx, y, rz);
+
+      const idx = (i + j * SLICE_W) * 4;
+      if (dIn < 0) {
+        dataArr[idx] = 30; dataArr[idx+1] = 34; dataArr[idx+2] = 44; dataArr[idx+3] = 235;
+        continue;
+      }
+      windVelocity(_sp, _sv);
+      const v = _sv.length();
+      const cp = 1 - v * v;            // Bernoulli, U∞ = 1
+      const t = Math.min(1, Math.max(0, (cp + 1.15) / 2.55));
+      const [r, g, b] = jet(t);
+      dataArr[idx] = r * 255; dataArr[idx+1] = g * 255; dataArr[idx+2] = b * 255;
+      dataArr[idx+3] = 200;
+    }
+  }
+
+  sliceTexture = new THREE.DataTexture(dataArr, SLICE_W, SLICE_H, THREE.RGBAFormat);
+  sliceTexture.needsUpdate = true;
+  sliceTexture.magFilter = THREE.LinearFilter;
+  sliceTexture.minFilter = THREE.LinearFilter;
+
+  const mat = new THREE.MeshBasicMaterial({
+    map: sliceTexture, transparent: true, side: THREE.DoubleSide, depthWrite: false,
+  });
+
+  let geoPlane;
+  if (sliceMode === 'v') {
+    geoPlane = new THREE.PlaneGeometry(spanX, spanOther);
+    sliceMesh = new THREE.Mesh(geoPlane, mat);
+    sliceMesh.position.set(SLICE_X0 + spanX/2, 0.03 + spanOther/2, pos);
+  } else {
+    geoPlane = new THREE.PlaneGeometry(spanX, spanOther);
+    geoPlane.rotateX(-Math.PI/2);
+    sliceMesh = new THREE.Mesh(geoPlane, mat);
+    sliceMesh.position.set(SLICE_X0 + spanX/2, pos, 0);
+  }
+  sliceMesh.renderOrder = 1;
+  scene.add(sliceMesh);
+}
+
+/* ============================================================
+   Oberflächendruck-Farben
+============================================================ */
+function applyPressureColors() {
+  if (!modelMesh) return;
+  const on = document.getElementById('pressure').checked;
+  const geo = modelMesh.geometry;
+  if (!on) {
+    modelMesh.material.vertexColors = false;
+    modelMesh.material.color.set(0x9aa7bd);
+    modelMesh.material.needsUpdate = true;
+    return;
+  }
+  const normals = geo.attributes.normal;
+  const n = new THREE.Vector3();
+  const colorsArr = new Float32Array(normals.count * 3);
+  const wind = new THREE.Vector3(1, 0, 0); // Modellraum
+  for (let i = 0; i < normals.count; i++) {
+    n.fromBufferAttribute(normals, i);
+    const d = -n.dot(wind);
+    const t = (d + 1) / 2;
+    const [r, g, b] = jet(Math.pow(t, 1.15));
+    colorsArr[i*3] = r; colorsArr[i*3+1] = g; colorsArr[i*3+2] = b;
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(colorsArr, 3));
+  modelMesh.material.vertexColors = true;
+  modelMesh.material.color.set(0xffffff);
+  modelMesh.material.needsUpdate = true;
+}
+
+/* ============================================================
+   Statistiken (grobe Schätzung, kein echtes CFD!)
+============================================================ */
+function updateStats() {
+  if (!modelMesh) return;
+  const speed = parseFloat(document.getElementById('speed').value);
+  const geo = modelMesh.geometry;
+  const pos = geo.attributes.position;
+
+  const wind = new THREE.Vector3(1, 0, 0); // Modellraum: Anströmwinkel dreht das Modell nicht relativ zum eigenen Raum
+  const yaw = -modelGroup.rotation.y;
+  wind.set(Math.cos(yaw), 0, Math.sin(yaw));
+
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
+  const ab = new THREE.Vector3(), ac = new THREE.Vector3(), fn = new THREE.Vector3();
+  let frontalArea = 0, weighted = 0, totalProj = 0;
+  for (let i = 0; i < pos.count; i += 3) {
+    a.fromBufferAttribute(pos, i); b.fromBufferAttribute(pos, i+1); c.fromBufferAttribute(pos, i+2);
+    ab.subVectors(b, a); ac.subVectors(c, a);
+    fn.crossVectors(ab, ac);
+    const area = fn.length() / 2;
+    if (area < 1e-9) continue;
+    fn.divideScalar(area * 2);
+    const d = -fn.dot(wind);
+    if (d > 0) {
+      const proj = area * d;
+      frontalArea += proj;
+      weighted += proj * d;
+      totalProj += proj;
+    }
+  }
+  const bluntness = totalProj > 0 ? weighted / totalProj : 0.5;
+  const cd = 0.08 + bluntness * 1.15;
+  const rho = 1.225;
+  const drag = 0.5 * rho * cd * frontalArea * speed * speed;
+
+  document.getElementById('s-speed').innerHTML = `${speed} <small>m/s</small>`;
+  document.getElementById('s-cd').textContent = cd.toFixed(2);
+  document.getElementById('s-area').innerHTML = `${frontalArea.toFixed(2)} <small>m²</small>`;
+  document.getElementById('s-drag').innerHTML = `${Math.round(drag)} <small>N</small>`;
+}
+
+/* ============================================================
+   UI-Events
+============================================================ */
+const $ = id => document.getElementById(id);
+
+$('speed').addEventListener('input', () => {
+  $('v-speed').textContent = $('speed').value + ' m/s';
+  updateStats();
+});
+$('lines').addEventListener('input', () => { $('v-lines').textContent = $('lines').value; });
+$('lines').addEventListener('change', rebuildStreamlines);
+$('yaw').addEventListener('input', () => {
+  const deg = parseFloat($('yaw').value);
+  $('v-yaw').textContent = deg + '°';
+  modelGroup.rotation.y = THREE.MathUtils.degToRad(deg);
+});
+$('yaw').addEventListener('change', () => { rebuildStreamlines(); updateSlice(); updateStats(); });
+$('pressure').addEventListener('change', applyPressureColors);
+$('wake').addEventListener('change', e => { wakeEnabled = e.target.checked; rebuildStreamlines(); updateSlice(); });
+$('autorotate').addEventListener('change', e => { controls.autoRotate = e.target.checked; controls.autoRotateSpeed = 1.2; });
+$('recalc').addEventListener('click', () => { applyPressureColors(); rebuildStreamlines(); updateSlice(); updateStats(); });
+
+document.querySelectorAll('#style-seg button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    if (btn.dataset.style === renderMode) return;
+    document.querySelectorAll('#style-seg button').forEach(x => x.classList.remove('on'));
+    btn.classList.add('on');
+    renderMode = btn.dataset.style;
+    rebuildStreamlines();
+  });
+});
+
+document.querySelectorAll('#slice-seg button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('#slice-seg button').forEach(x => x.classList.remove('on'));
+    btn.classList.add('on');
+    sliceMode = btn.dataset.slice;
+    $('slicepos').disabled = sliceMode === 'off';
+    updateSlice();
+  });
+});
+let sliceThrottle = null;
+$('slicepos').addEventListener('input', () => {
+  if (sliceThrottle) return;
+  sliceThrottle = setTimeout(() => { sliceThrottle = null; updateSlice(); }, 60);
+});
+
+document.querySelectorAll('[data-demo]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const d = btn.dataset.demo;
+    loadModel(d === 'car' ? demoCar() : d === 'sphere' ? demoSphere() : demoCapsule());
+  });
+});
+
+/* --- Modell ausrichten --- */
+async function reorient(fn) {
+  loading.classList.add('on');
+  await new Promise(r => setTimeout(r, 30));
+  try { fn(); applyOrientation(); }
+  finally { loading.classList.remove('on'); }
+}
+$('rot-x').addEventListener('click', () => reorient(() => { orient.rx = (orient.rx + 90) % 360; }));
+$('rot-y').addEventListener('click', () => reorient(() => { orient.ry = (orient.ry + 90) % 360; }));
+$('rot-z').addEventListener('click', () => reorient(() => { orient.rz = (orient.rz + 90) % 360; }));
+$('scale').addEventListener('input', () => { $('v-scale').textContent = $('scale').value + ' %'; });
+$('scale').addEventListener('change', () => reorient(() => { orient.scale = parseFloat($('scale').value) / 100; }));
+
+/* --- UI ein-/ausblenden --- */
+$('ui-toggle').addEventListener('click', () => {
+  const hidden = document.body.classList.toggle('ui-hidden');
+  $('ui-toggle').textContent = hidden ? '◨' : '◧';
+});
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+/* ============================================================
+   Render-Loop
+============================================================ */
+const clock = new THREE.Clock();
+let flowTime = 0; // akkumulierte "Strömungszeit", skaliert mit Windgeschwindigkeit
+function tick() {
+  requestAnimationFrame(tick);
+  const dt = Math.min(clock.getDelta(), 0.1);
+  const speedFactor = parseFloat($('speed').value) / 30; // 30 m/s = Referenz
+  flowTime += dt * speedFactor;
+  if (streamUniforms) {
+    streamUniforms.uTime.value = flowTime;
+    streamUniforms.uAnimate.value = $('animate').checked ? 1 : 0;
+  }
+  controls.update();
+  renderer.render(scene, camera);
+}
+
+loadModel(demoCar());
+tick();
+
+window.__aero = { camera, controls, scene };
+window.__testBlend = async url => {
+  const buf = await (await fetch(url)).arrayBuffer();
+  const geo = await loadBlend(buf);
+  loadModel(geo);
+  return 'ok: ' + geo.attributes.position.count + ' verts';
+};
+</script>
+</body>
+</html>
